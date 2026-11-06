@@ -3,7 +3,7 @@ name = "penguin-creator"
 version = "1.0.0"
 description = "A pixel-art character creator for building Palmer-penguins-compatible datasets."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.15"
 license = "MIT"
 # The app itself only uses the Python standard library.
 dependencies = []

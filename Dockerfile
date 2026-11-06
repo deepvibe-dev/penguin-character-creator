@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
-ARG PYTHON_IMAGE=python:3.13-slim
+ARG PYTHON_IMAGE=python:3.15-slim
 FROM ${PYTHON_IMAGE}
 
 # uv manages the project; the app itself only needs the standard library.
-RUN pip install --no-cache-dir uv==0.11.32
+RUN pip install --no-cache-dir uv==0.13.5
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
