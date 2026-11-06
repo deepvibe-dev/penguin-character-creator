@@ -60,8 +60,10 @@ def summarize(values: list[float]) -> dict | None:
         "sd": sd,
         "min": values[0],
         "max": values[-1],
+        "p025": _quantile(values, 0.025),
         "p05": _quantile(values, 0.05),
         "p95": _quantile(values, 0.95),
+        "p975": _quantile(values, 0.975),
     }
 
 

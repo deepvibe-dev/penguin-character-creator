@@ -24,6 +24,7 @@ import os
 import shutil
 import tempfile
 import threading
+import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -148,6 +149,9 @@ def make_handler(app: App):
                 self._error(HTTPStatus.NOT_FOUND, str(exc))
             except OverflowError as exc:
                 self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+            except Exception:  # noqa: BLE001 - never drop the connection silently
+                self.log_error("Unhandled error on %s %s:\n%s", self.command, path, traceback.format_exc())
+                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "Internal server error.")
 
         def _static(self, path: str):
             if path in ("", "/"):

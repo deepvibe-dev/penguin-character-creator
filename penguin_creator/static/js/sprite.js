@@ -434,3 +434,71 @@ export function drawScene(canvas, record, opts = {}) {
     ctx.fillRect(75, 21, 1, 1);
   }
 }
+
+// --- mini sprites for the colony map ----------------------------------------
+
+export const MINI_W = 16;
+export const MINI_H = 20;
+const miniCache = new Map();
+
+/**
+ * A 16x20 penguin for the overview map. Body width follows body mass, height and
+ * flippers follow flipper length, bill length/thickness follow the culmen, and
+ * plumage/bill/feet follow the species. Sprites are cached by quantised traits.
+ */
+export function miniPenguin(record, fallbacks) {
+  const species = shortSpecies(record.Species) || "Adelie";
+  const nm = norm(num(record, "Body Mass (g)", fallbacks), 2600, 6400);
+  const nf = norm(num(record, "Flipper Length (mm)", fallbacks), 170, 235);
+  const nl = norm(num(record, "Culmen Length (mm)", fallbacks), 32, 60);
+  const nd = norm(num(record, "Culmen Depth (mm)", fallbacks), 13, 22);
+  const q = (v, steps) => Math.round(v * steps) / steps;
+  const key = `${species}|${q(nm, 6)}|${q(nf, 6)}|${q(nl, 4)}|${nd > 0.5}`;
+  let canvas = miniCache.get(key);
+  if (canvas) return canvas;
+
+  const style = SPECIES_STYLE[species];
+  const p = new Pixels(MINI_W, MINI_H);
+  const footY = 18;
+  const bodyRx = 2.4 + 2.6 * q(nm, 6);
+  const bodyRy = 4 + 2.4 * q(nf, 6) + 0.8 * q(nm, 6);
+  const cx = 7;
+  const cy = footY - 1 - bodyRy;
+  p.ellipse(cx, cy, bodyRx, bodyRy, PALETTE.back);
+  p.ellipse(cx + 1, cy + 0.8, bodyRx * 0.6, bodyRy - 1.3, PALETTE.belly);
+  const hr = 2.2 + 0.5 * q(nm, 6);
+  const hx = cx + 1;
+  const hy = cy - bodyRy + hr * 0.6;
+  p.ellipse(hx, hy, hr, hr, PALETTE.back);
+  const ex = Math.round(hx + 1);
+  const ey = Math.round(hy - 0.5);
+  if (species === "Chinstrap") {
+    p.ellipse(hx + 0.5, hy + 0.8, hr - 0.4, hr - 1, PALETTE.belly, (x, y) => y >= ey);
+    p.line(hx - 1, ey + 2, hx + 1, ey + 2, PALETTE.back);
+    p.set(ex, ey, PALETTE.eye);
+  } else if (species === "Gentoo") {
+    p.set(ex - 1, ey - 1, PALETTE.belly);
+    p.set(ex, ey - 1, PALETTE.belly);
+  } else {
+    p.set(ex, ey, PALETTE.belly);
+  }
+  const billLen = 1 + Math.round(2.5 * q(nl, 4));
+  const bx = Math.round(hx + hr);
+  const by = Math.round(hy + 0.5);
+  for (let i = 0; i < billLen; i++) {
+    p.set(bx + i, by, style.bill);
+    if (nd > 0.5 && i < billLen - 1) p.set(bx + i, by + 1, style.bill);
+  }
+  const fl = 2 + Math.round(3 * q(nf, 6));
+  p.line(cx - bodyRx + 0.5, cy - 1, cx - bodyRx - 0.5, cy - 1 + fl, PALETTE.backLight);
+  p.set(cx - 1, footY, style.feet);
+  p.set(cx + 2, footY, style.feet);
+  p.outline(OUTLINE);
+
+  canvas = document.createElement("canvas");
+  canvas.width = MINI_W;
+  canvas.height = MINI_H;
+  p.drawTo(canvas.getContext("2d"));
+  miniCache.set(key, canvas);
+  return canvas;
+}

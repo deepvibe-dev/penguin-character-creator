@@ -1,5 +1,7 @@
 // Penguin Creator front end. Plain ES modules, no build step, no dependencies.
 import { drawScene, drawThumbnail, shortSpecies, SPECIES_FULL } from "./sprite.js";
+import { renderColony } from "./colony.js";
+import { Camera } from "./camera.js";
 
 const LTER_COLUMNS = [
   "studyName", "Sample Number", "Species", "Region", "Island", "Stage", "Individual ID",
@@ -55,6 +57,9 @@ const state = {
   measuresTouched: false, // has the user moved a slider on this draft?
   fieldsFor: null, // draft the field inputs currently show
   page: 0,
+  view: "creator", // "creator" | "map"
+  camera: null,
+  dragJustEnded: false,
   checked: new Set(),
   frame: 0,
 };
@@ -155,8 +160,8 @@ function assess(rec) {
     const name = label;
     if (v < s.min || v > s.max) {
       notes.push({ level: "bad", text: `${name} ${rec[m]} is ${v < s.min ? "below" : "above"} anything measured in real ${groupLabel(rec)} (${fmt(s.min, 2)}–${fmt(s.max, 2)}).` });
-    } else if (v < s.p05 || v > s.p95) {
-      notes.push({ level: "warn", text: `${name} ${rec[m]} is unusually ${v < s.p05 ? "low" : "high"} for ${groupLabel(rec)}.` });
+    } else if (v < s.p025 || v > s.p975) {
+      notes.push({ level: "warn", text: `${name} ${rec[m]} is unusually ${v < s.p025 ? "low" : "high"} for ${groupLabel(rec)}.` });
     }
   }
   const level = notes.some((n) => n.level === "bad") ? "bad" : notes.length ? "warn" : "ok";
@@ -373,7 +378,7 @@ function trackGradient(m, rec) {
   const seen = "var(--band-seen)";
   const typ = "var(--band-typical)";
   const meanL = ((s.mean - lim.min) / (lim.max - lim.min)) * 100;
-  return `linear-gradient(to right, ${base} 0 ${pct(s.min)}, ${seen} ${pct(s.min)} ${pct(s.p05)}, ${typ} ${pct(s.p05)} ${(meanL - 0.6).toFixed(2)}%, var(--line) ${(meanL - 0.6).toFixed(2)}% ${(meanL + 0.6).toFixed(2)}%, ${typ} ${(meanL + 0.6).toFixed(2)}% ${pct(s.p95)}, ${seen} ${pct(s.p95)} ${pct(s.max)}, ${base} ${pct(s.max)} 100%)`;
+  return `linear-gradient(to right, ${base} 0 ${pct(s.min)}, ${seen} ${pct(s.min)} ${pct(s.p025)}, ${typ} ${pct(s.p025)} ${(meanL - 0.6).toFixed(2)}%, var(--line) ${(meanL - 0.6).toFixed(2)}% ${(meanL + 0.6).toFixed(2)}%, ${typ} ${(meanL + 0.6).toFixed(2)}% ${pct(s.p975)}, ${seen} ${pct(s.p975)} ${pct(s.max)}, ${base} ${pct(s.max)} 100%)`;
 }
 
 function renderSliders() {
@@ -400,14 +405,14 @@ function renderSliders() {
       if (v < s.min || v > s.max) {
         status = "bad";
         range.classList.add("bad");
-      } else if (v < s.p05 || v > s.p95) {
+      } else if (v < s.p025 || v > s.p975) {
         status = "warn";
         range.classList.add("warn");
       }
     }
     hint.textContent = "";
     if (s) {
-      hint.append(`Typical ${groupLabel(rec)}: ${fmt(s.p05, precision)}–${fmt(s.p95, precision)}`);
+      hint.append(`Typical ${groupLabel(rec)}: ${fmt(s.p025, precision)}–${fmt(s.p975, precision)}`);
       if (status) hint.append(" · ", el("span", { class: status }, status === "bad" ? "never seen" : "unusual"));
     } else if (v === null) {
       hint.append("Missing (written as NA)");
@@ -705,6 +710,69 @@ function renderAll() {
   renderStatus();
   renderCreator();
   renderLedger();
+  if (state.view === "map") renderMap();
+}
+
+// ---------------------------------------------------------------------------
+// colony map
+
+function describePenguin(r, index) {
+  const unit = { "Culmen Length (mm)": "mm", "Culmen Depth (mm)": "mm", "Flipper Length (mm)": "mm", "Body Mass (g)": "g" };
+  const val = (m) => (r[m] ? `${r[m]} ${unit[m] || ""}`.trim() : "NA");
+  const { level } = assess(r);
+  return [
+    `#${index + 1} ${r["Individual ID"] || ""} \u00b7 ${shortSpecies(r.Species) || r.Species || "?"} ${sexSymbol(r.Sex)}`,
+    `bill   ${val("Culmen Length (mm)")} \u00d7 ${val("Culmen Depth (mm)")}`,
+    `flipper ${val("Flipper Length (mm)")}`,
+    `mass   ${val("Body Mass (g)")}`,
+    { ok: "plausible", warn: "unusual", bad: "implausible", unknown: "unknown species" }[level],
+  ].join("\n");
+}
+
+function renderMap() {
+  const stage = $("#map-stage");
+  const viewport = $("#map-scroll");
+  if (!state.camera) {
+    state.camera = new Camera(viewport, stage, {
+      onClickBlocked: () => {
+        state.dragJustEnded = true;
+        setTimeout(() => { state.dragJustEnded = false; }, 0);
+      },
+    });
+    state.camera.onZoom = (z) => {
+      $("#map-zoom").textContent = `${z >= 1 ? z.toFixed(1).replace(/\.0$/, "") : z.toFixed(2)}\u00d7`;
+    };
+  }
+  const opts = {
+    clickBlocked: () => state.dragJustEnded,
+    assess,
+    markUnusual: $("#map-unusual").checked,
+    fallbacks: speciesMeans,
+    describe: describePenguin,
+    onSelect: (rec) => {
+      setView("creator");
+      editRecord(rec);
+      const list = filteredRecords();
+      if (list.includes(rec)) {
+        state.page = Math.floor(list.indexOf(rec) / PAGE_SIZE);
+        renderLedger();
+      }
+    },
+  };
+  const { width, height } = renderColony(stage, state.records, opts);
+  state.camera.setWorld(width, height);
+  state.camera.edgeScroll = $("#map-edge").checked;
+  const n = state.records.length;
+  $("#map-count").textContent = `(${n} penguin${n === 1 ? "" : "s"})`;
+}
+
+function setView(view) {
+  state.view = view;
+  $("#creator-view").hidden = view !== "creator";
+  $("#map-view").hidden = view !== "map";
+  for (const tab of document.querySelectorAll(".tab")) tab.setAttribute("aria-pressed", String(tab.dataset.view === view));
+  if (view === "map") renderMap();
+  if (state.camera) state.camera.setActive(view === "map");
 }
 
 // ---------------------------------------------------------------------------
@@ -867,6 +935,12 @@ function wire() {
     scheduleAutosave();
   });
   $("#btn-download").addEventListener("click", download);
+  for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => setView(tab.dataset.view));
+  $("#map-unusual").addEventListener("change", renderMap);
+  $("#map-zoom-in").addEventListener("click", () => state.camera && state.camera.zoomBy(1.5));
+  $("#map-zoom-out").addEventListener("click", () => state.camera && state.camera.zoomBy(1 / 1.5));
+  $("#map-fit").addEventListener("click", () => state.camera && state.camera.fit());
+  $("#map-edge").addEventListener("change", (e) => { if (state.camera) state.camera.edgeScroll = e.target.checked; });
   $("#btn-save-server").addEventListener("click", saveToServer);
 
   $("#btn-save").addEventListener("click", () => saveDraft(false));

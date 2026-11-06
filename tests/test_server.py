@@ -108,3 +108,22 @@ def test_workspace_save_and_load(server):
     assert path.with_suffix(".csv.bak").exists()
     _, loaded = call(base, "/api/workspace")
     assert loaded["records"][0]["Comments"] == "edited"
+
+
+def test_every_referenced_static_asset_exists():
+    """No build step and no CDN: everything the page loads must be vendored."""
+    import re
+
+    from penguin_creator.server import STATIC_DIR
+
+    html = (STATIC_DIR / "index.html").read_text()
+    refs = re.findall(r'(?:src|href)="/static/([^"]+)"', html)
+    css = (STATIC_DIR / "css" / "style.css").read_text()
+    refs += ["css/" + u for u in re.findall(r'url\("([^"]+)"\)', css)]
+    for js in (STATIC_DIR / "js").glob("*.js"):
+        refs += ["js/" + m for m in re.findall(r'from "\./([^"]+)"', js.read_text())]
+    assert refs
+    for ref in refs:
+        assert (STATIC_DIR / ref).resolve().is_file(), ref
+    assert not re.findall(r'(?:src|href)="(?:https?:)?//', html), "external resources are not allowed"
+    assert "@import" not in css

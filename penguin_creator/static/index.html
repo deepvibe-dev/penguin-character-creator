@@ -10,6 +10,10 @@
 <body>
   <header class="topbar">
     <h1 class="title"><span class="title-icon" aria-hidden="true"></span>Penguin Creator</h1>
+    <nav class="tabs" aria-label="View">
+      <button class="tab" data-view="creator" aria-pressed="true">Creator</button>
+      <button class="tab" data-view="map" aria-pressed="false">Colony map</button>
+    </nav>
     <nav class="toolbar" aria-label="File">
       <button class="btn" id="btn-new-file" title="Start an empty dataset">New</button>
       <label class="btn" title="Open a Palmer penguins CSV (replaces the current colony)">Open CSV<input type="file" id="file-open" accept=".csv,text/csv" hidden></label>
@@ -28,7 +32,7 @@
 
   <div class="statusline" id="statusline" role="status" aria-live="polite"></div>
 
-  <main class="layout">
+  <main class="layout" id="creator-view">
     <!-- ============ creator ============ -->
     <section class="panel creator" aria-labelledby="creator-title">
       <h2 id="creator-title" class="panel-title"><span id="creator-mode">New penguin</span></h2>
@@ -83,7 +87,7 @@
         <div class="sliders-col">
           <div id="sliders"></div>
           <div class="slider-key" aria-hidden="true">
-            <span><i class="key key-typical"></i>typical (90% of real penguins)</span>
+            <span><i class="key key-typical"></i>typical (95% of real penguins)</span>
             <span><i class="key key-seen"></i>ever observed</span>
             <span><i class="key key-mean"></i>average</span>
           </div>
@@ -159,6 +163,26 @@
       </div>
     </section>
   </main>
+
+  <!-- ============ colony map ============ -->
+  <section class="panel map-panel" id="map-view" aria-labelledby="map-title" hidden>
+    <div class="map-head">
+      <h2 id="map-title" class="panel-title">Colony map <small id="map-count"></small></h2>
+      <div class="map-tools">
+        <label><input type="checkbox" id="map-unusual"> Flag unusual penguins</label>
+        <label title="Pan when the pointer rests near the edge of the map"><input type="checkbox" id="map-edge" checked> Edge scrolling</label>
+        <button class="btn btn-small" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+        <output id="map-zoom">1&times;</output>
+        <button class="btn btn-small" id="map-zoom-in" aria-label="Zoom in">+</button>
+        <button class="btn btn-small" id="map-fit">Fit</button>
+      </div>
+    </div>
+    <p class="hint">Every penguin in the file, on the island where it was recorded and grouped by species. Bigger birds are drawn bigger, with longer flippers and bills to match their measurements. Hover a penguin for its numbers, or click it to open it in the creator.<br>
+      Drag, use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrow keys or rest the pointer at an edge to pan; scroll to zoom; <kbd>0</kbd> fits the map.</p>
+    <div class="map-scroll" id="map-scroll">
+      <div class="map-stage" id="map-stage"></div>
+    </div>
+  </section>
 
   <!-- ============ batch dialog ============ -->
   <dialog id="hatch-dialog" class="panel modal">
