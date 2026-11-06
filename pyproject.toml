@@ -1,6 +1,6 @@
 [project]
 name = "penguin-creator"
-version = "1.0.0"
+version = "0.0.0"
 description = "A pixel-art character creator for building Palmer-penguins-compatible datasets."
 readme = "README.md"
 requires-python = ">=3.15"
@@ -27,3 +27,19 @@ packages = ["penguin_creator"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+# Versioning: semantic versions derived from Conventional Commits.
+# `cz bump` (run by CI on main) picks the next version, updates the files
+# below, writes CHANGELOG.md, commits and tags vX.Y.Z.
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true
+changelog_incremental = true
+annotated_tag = true
+bump_message = "chore(release): v$new_version [skip ci]"
+version_files = ["penguin_creator/__init__.py:__version__"]
+# keep uv.lock's copy of the project version in sync with pyproject.toml
+pre_bump_hooks = ["uv lock", "git add uv.lock"]

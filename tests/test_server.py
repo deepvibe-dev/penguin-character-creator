@@ -6,6 +6,7 @@ import urllib.request
 import pytest
 
 from conftest import KAGGLE_LTER, R_SIMPLE, read_text
+from penguin_creator import __version__
 from penguin_creator.server import make_server
 
 
@@ -54,7 +55,7 @@ def test_path_traversal_is_blocked(server):
 
 def test_health_and_reference(server):
     base, _ = server
-    assert call(base, "/healthz") == (200, {"status": "ok", "version": "1.0.0"})
+    assert call(base, "/healthz") == (200, {"status": "ok", "version": __version__})
     status, ref = call(base, "/api/reference")
     assert status == 200
     assert set(ref["species"]) == {"Adelie", "Chinstrap", "Gentoo"}

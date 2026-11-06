@@ -64,8 +64,9 @@ between layouts.
 
 ## Running it
 
-Everything is managed with [uv](https://docs.astral.sh/uv/). The app only
-uses the Python standard library. The front end is plain ES modules with
+Requires Python 3.15. Everything is managed with
+[uv](https://docs.astral.sh/uv/), which installs the right Python for you.
+The app only uses the Python standard library. The front end is plain ES modules with
 vendored fonts: no Node.js, no JS package manager, no CDN.
 
 ```bash
@@ -97,23 +98,58 @@ The container serves on port 8000 and reads and writes
 `/data/penguins.csv`, so mount a directory there to keep your colony. It
 runs as a non-root user and has a health check on `/healthz`.
 
+Released images are published for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker run --rm -p 8000:8000 -v "$PWD/colony:/data" ghcr.io/deepvibe-dev/penguin-character-creator:latest
+```
+
 ### Tests
 
 ```bash
 uv run pytest
 ```
 
+## Versioning and commits
+
+Versions follow [Semantic Versioning](https://semver.org/) and are derived
+automatically from [Conventional Commits](https://www.conventionalcommits.org/)
+using [commitizen](https://commitizen-tools.github.io/commitizen/):
+
+| Commit | Release |
+| --- | --- |
+| `fix: ...` | patch (`0.1.0` → `0.1.1`) |
+| `feat: ...` | minor (`0.1.1` → `0.2.0`) |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major (minor while the version is `0.x`) |
+| `docs:`, `chore:`, `ci:`, `test:`, `build:`, `refactor:`, `style:` | no release |
+
+Every commit in a pull request, and the PR title (used as the squash-merge
+message), must follow the convention. To check locally:
+
+```bash
+uvx --from commitizen cz check --rev-range origin/main..HEAD
+```
+
+Don't bump versions by hand. On every push to `main`, CI works out the next
+version, updates `pyproject.toml`, `penguin_creator/__init__.py`, `uv.lock`
+and `CHANGELOG.md`, then commits `chore(release): vX.Y.Z`, tags `vX.Y.Z` and
+creates a GitHub release.
+
 ## CI/CD
 
 `.github/workflows/ci.yml` does the following:
 
-1. Runs the test suite on Python 3.11, 3.12 and 3.13 and checks that
-   `uv.lock` is current.
-2. Builds the Docker image and smoke-tests it: health check, page load,
-   and a save through the API that must reproduce the original CSV
+1. **Pull requests:** checks that the PR title and every commit are
+   Conventional Commits.
+2. **Every run:** runs the tests on Python 3.15 and checks that `uv.lock`
+   is current. Builds the image for `linux/amd64` and `linux/arm64` (arm64
+   under QEMU) and smoke-tests each one: architecture, health check, page
+   load, and a save through the API that must reproduce the original CSV
    byte-for-byte.
-3. On pushes to `main` and on `v*` tags, publishes the image to
-   `ghcr.io/<owner>/<repo>`.
+3. **Pushes to `main`:** releases (see above), then publishes one
+   multi-arch image to `ghcr.io/deepvibe-dev/penguin-character-creator`.
+   A release is tagged `X.Y.Z`, `X.Y`, `X` (from 1.0 on) and `latest`, and
+   every `main` build is also tagged `main` and `sha-<commit>`.
 
 ## Project layout
 
