@@ -12,18 +12,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH="/app/.venv/bin:$PATH" \
     HOST=0.0.0.0 \
-    PORT=8000 \
-    PENGUIN_DATA_FILE=/data/penguins.csv
+    PORT=8000
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY penguin_creator ./penguin_creator
 RUN uv sync --frozen --no-dev \
-    && useradd --create-home --uid 10001 penguin \
-    && mkdir -p /data && chown penguin /data
+    && useradd --create-home --uid 10001 penguin
 
 USER penguin
-VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/healthz')" || exit 1
 CMD ["penguin-creator"]

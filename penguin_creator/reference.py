@@ -1,26 +1,43 @@
-"""Reference statistics of real penguins, used to nudge users towards plausible values."""
+"""Build ``static/data/reference.json`` from the original Palmer penguins data.
+
+The browser uses this file to show the plausible range of every measurement
+(per species and sex) and to hatch new penguins from the real distributions.
+It is generated once and committed; ``tests/test_reference.py`` fails if it
+is out of date. Regenerate it with::
+
+    uv run python -m penguin_creator.reference
+"""
 
 from __future__ import annotations
 
+import csv
+import json
 import math
 from collections import Counter
-from functools import lru_cache
 from pathlib import Path
 
-from .dataset import (
-    ISLANDS,
-    NUMERIC_PRECISION,
-    SEXES,
-    SPECIES,
-    numeric_value,
-    parse_csv,
-    short_species,
-)
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+REFERENCE_CSV = STATIC_DIR / "data" / "penguins_lter.csv"
+REFERENCE_JSON = STATIC_DIR / "data" / "reference.json"
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
-REFERENCE_CSV = DATA_DIR / "penguins_lter.csv"
+SPECIES = {
+    "Adelie": "Adelie Penguin (Pygoscelis adeliae)",
+    "Chinstrap": "Chinstrap penguin (Pygoscelis antarctica)",
+    "Gentoo": "Gentoo penguin (Pygoscelis papua)",
+}
+ISLANDS = ["Biscoe", "Dream", "Torgersen"]
+SEXES = ["MALE", "FEMALE"]
 
-MEASURES = list(NUMERIC_PRECISION)
+# Number of decimals the original dataset uses for each measurement.
+PRECISION = {
+    "Culmen Length (mm)": 1,
+    "Culmen Depth (mm)": 1,
+    "Flipper Length (mm)": 0,
+    "Body Mass (g)": 0,
+    "Delta 15 N (o/oo)": 5,
+    "Delta 13 C (o/oo)": 5,
+}
+MEASURES = list(PRECISION)
 
 # Slider limits: wide enough for every real penguin, plus some room for fantasy.
 SLIDER_LIMITS = {
@@ -32,16 +49,24 @@ SLIDER_LIMITS = {
     "Delta 13 C (o/oo)": (-27.5, -23.0, 0.00001),
 }
 
+# Measurements sampled jointly by the generator (they are correlated).
+MODEL_GROUPS = {"body": MEASURES[:4], "isotopes": MEASURES[4:]}
 
-def load_reference_records(path: Path = REFERENCE_CSV) -> list[dict]:
+
+def load_records(path: Path = REFERENCE_CSV) -> list[dict]:
     with open(path, newline="", encoding="utf-8") as fh:
-        _, records = parse_csv(fh.read())
-    return records
+        return list(csv.DictReader(fh))
+
+
+def number(record: dict, col: str) -> float | None:
+    try:
+        value = float(record.get(col, ""))
+    except ValueError:
+        return None
+    return None if math.isnan(value) else value
 
 
 def _quantile(sorted_values: list[float], q: float) -> float:
-    if not sorted_values:
-        return math.nan
     pos = (len(sorted_values) - 1) * q
     lo, hi = math.floor(pos), math.ceil(pos)
     return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
@@ -78,74 +103,51 @@ def covariance(rows: list[list[float]]) -> tuple[list[float], list[list[float]]]
     return means, cov
 
 
-def compute_reference(records: list[dict]) -> dict:
-    """Per species (and per species+sex) distribution of every measurement."""
+def compute(records: list[dict]) -> dict:
+    """Per-species statistics, per-species/sex statistics and generator models."""
     species_stats = {}
+    models = {}
     for short, full in SPECIES.items():
         members = [r for r in records if r["Species"] == full]
         entry = {"full_name": full, "count": len(members), "measures": {}, "by_sex": {}}
         for m in MEASURES:
-            entry["measures"][m] = summarize(
-                [v for r in members if (v := numeric_value(r, m)) is not None]
-            )
+            entry["measures"][m] = summarize([v for r in members if (v := number(r, m)) is not None])
         for sex in SEXES:
             sub = [r for r in members if r["Sex"] == sex]
             entry["by_sex"][sex] = {
-                m: summarize([v for r in sub if (v := numeric_value(r, m)) is not None])
-                for m in MEASURES
+                m: summarize([v for r in sub if (v := number(r, m)) is not None]) for m in MEASURES
             }
+            model = {}
+            for name, cols in MODEL_GROUPS.items():
+                rows = [vals for r in sub if None not in (vals := [number(r, c) for c in cols])]
+                means, cov = covariance(rows)
+                model[name] = {"columns": cols, "mean": means, "cov": cov}
+            models[f"{short}|{sex}"] = model
         islands = Counter(r["Island"] for r in members if r["Island"])
         entry["islands"] = {i: islands.get(i, 0) for i in ISLANDS}
         clutch = Counter(r["Clutch Completion"] for r in members)
         entry["clutch_yes_rate"] = clutch.get("Yes", 0) / max(1, sum(clutch.values()))
         species_stats[short] = entry
     return {
+        "source": REFERENCE_CSV.name,
         "species": species_stats,
         "islands": ISLANDS,
         "sexes": SEXES,
         "measures": MEASURES,
-        "precision": NUMERIC_PRECISION,
+        "precision": PRECISION,
         "limits": {m: {"min": a, "max": b, "step": s} for m, (a, b, s) in SLIDER_LIMITS.items()},
+        "models": models,
     }
 
 
-def compute_models(records: list[dict]) -> dict:
-    """Multivariate normal models per (species, sex), used by the generator.
-
-    Body measurements are strongly correlated (a heavy penguin has long
-    flippers), so they are sampled jointly. Isotopes are modelled jointly too.
-    """
-    groups = {
-        "body": MEASURES[:4],
-        "isotopes": MEASURES[4:],
-    }
-    models = {}
-    for short, full in SPECIES.items():
-        for sex in SEXES:
-            members = [r for r in records if r["Species"] == full and r["Sex"] == sex]
-            model = {}
-            for name, cols in groups.items():
-                rows = []
-                for r in members:
-                    vals = [numeric_value(r, c) for c in cols]
-                    if all(v is not None for v in vals):
-                        rows.append(vals)
-                means, cov = covariance(rows)
-                model[name] = {"columns": cols, "mean": means, "cov": cov}
-            models[(short, sex)] = model
-    return models
+def render(reference: dict) -> str:
+    return json.dumps(reference, indent=1, sort_keys=True) + "\n"
 
 
-@lru_cache(maxsize=1)
-def reference() -> dict:
-    return compute_reference(load_reference_records())
+def main() -> None:
+    REFERENCE_JSON.write_text(render(compute(load_records())), encoding="utf-8")
+    print(f"Wrote {REFERENCE_JSON}")
 
 
-@lru_cache(maxsize=1)
-def models() -> dict:
-    return compute_models(load_reference_records())
-
-
-def species_key(value: str) -> str | None:
-    short = short_species(value)
-    return short if short in SPECIES else None
+if __name__ == "__main__":
+    main()

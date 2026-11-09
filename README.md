@@ -6,6 +6,10 @@ Open the original CSV (or your own), design penguins one by one, hatch
 whole colonies at once, browse everyone on a map of the islands, and save
 a file that any existing Palmer penguins code can read.
 
+Everything runs in your browser: files you open are read on your machine and
+downloads are built there too. The Python server only hands out the static
+files, so nothing you edit is ever uploaded.
+
 ## Features
 
 - **Pixel-art penguins that follow the data.** Body mass sets the bird's
@@ -33,8 +37,8 @@ a file that any existing Palmer penguins code can read.
   works like a city-builder's: drag (with inertia), WASD or arrow keys,
   edge scrolling, and smooth mouse-wheel zoom toward the pointer.
 - **Read, edit and append CSVs.** Open a file, append another one to it,
-  and download the result. You can also run the server against a CSV on
-  disk and save straight to it.
+  and download the result. The open colony is also kept in the browser's
+  local storage, so a reload doesn't lose your work.
 
 ## Compatibility with the Palmer penguins format
 
@@ -46,7 +50,9 @@ stylistic variants:
 | Raw LTER, 17 columns (`studyName` … `Comments`) | Kaggle `penguins_lter.csv` (M/D/YY dates, empty NAs, CRLF); R/Python `penguins_raw` (ISO dates, `NA`) |
 | palmerpenguins, 8 columns (`species` … `year`) | R/Python `penguins.csv` (`NA`, lowercase sex); seaborn's `penguins.csv` (no `year`, `Male`, `181.0`) |
 
-Guarantees, all covered by `tests/test_compatibility.py`:
+Guarantees, all covered by `tests/test_compatibility.py`. Those tests run
+the app's own JavaScript reader and writer (`static/js/csv.js`) in headless
+Chrome and check the output with pandas:
 
 - Reading a file and saving it without changes gives **byte-identical**
   output for every original file (quoting, NA token, date style, line
@@ -66,23 +72,18 @@ between layouts.
 
 Requires Python 3.15. Everything is managed with
 [uv](https://docs.astral.sh/uv/), which installs the right Python for you.
-The app only uses the Python standard library. The front end is plain ES modules with
-vendored fonts: no Node.js, no JS package manager, no CDN.
+The server only uses the Python standard library. The front end is plain ES
+modules with vendored fonts: no Node.js, no JS package manager, no CDN.
 
 ```bash
 uv run penguin-creator
 ```
 
-Then open <http://127.0.0.1:8000>. To open and save a CSV on disk (created
-if it doesn't exist):
+Then open <http://127.0.0.1:8000>. Options: `--host` and `--port`, or the
+environment variables `HOST` and `PORT`.
 
-```bash
-uv run penguin-creator --data my_penguins.csv
-```
-
-Options: `--host`, `--port` and `--data`, or the environment variables
-`HOST`, `PORT` and `PENGUIN_DATA_FILE`. Each save keeps the previous file
-as `my_penguins.csv.bak`.
+The server only answers `GET` and `HEAD` (anything else gets a 405), so it
+sits happily behind web application firewalls and strict ingress policies.
 
 ### Docker
 
@@ -91,23 +92,36 @@ docker build -t penguin-creator .
 ```
 
 ```bash
-docker run --rm -p 8000:8000 -v "$PWD/colony:/data" penguin-creator
+docker run --rm -p 8000:8000 penguin-creator
 ```
 
-The container serves on port 8000 and reads and writes
-`/data/penguins.csv`, so mount a directory there to keep your colony. It
-runs as a non-root user and has a health check on `/healthz`.
+The container serves on port 8000, runs as a non-root user, needs no volume
+and has a health check on `/healthz`.
 
 Released images are published for `linux/amd64` and `linux/arm64`:
 
 ```bash
-docker run --rm -p 8000:8000 -v "$PWD/colony:/data" ghcr.io/deepvibe-dev/penguin-character-creator:latest
+docker run --rm -p 8000:8000 ghcr.io/deepvibe-dev/penguin-character-creator:latest
 ```
 
 ### Tests
 
 ```bash
 uv run pytest
+```
+
+The CSV and generator tests drive a headless Chrome over the DevTools
+protocol (`tests/browser.py`), with no Node.js or Playwright involved. The
+tests look for `google-chrome` or `chromium` on the `PATH`; set `CHROME_BIN`
+to point at another binary. Without Chrome those tests are skipped locally,
+and they fail in CI.
+
+`static/data/reference.json` (the slider bands and generator models) is
+built from the original CSV. After changing `penguin_creator/reference.py`,
+regenerate it and commit the result; a test fails if it is stale:
+
+```bash
+uv run python -m penguin_creator.reference
 ```
 
 ## Versioning and commits
@@ -143,9 +157,8 @@ creates a GitHub release.
    Conventional Commits.
 2. **Every run:** runs the tests on Python 3.15 and checks that `uv.lock`
    is current. Builds the image for `linux/amd64` and `linux/arm64` (arm64
-   under QEMU) and smoke-tests each one: architecture, health check, page
-   load, and a save through the API that must reproduce the original CSV
-   byte-for-byte.
+   under QEMU) and smoke-tests each one: architecture, health check, and
+   that the page, the scripts and the data files are served unchanged.
 3. **Pushes to `main`:** releases (see above), then publishes one
    multi-arch image to `ghcr.io/deepvibe-dev/penguin-character-creator`.
    A release is tagged `X.Y.Z`, `X.Y`, `X` (from 1.0 on) and `latest`, and
@@ -155,13 +168,18 @@ creates a GitHub release.
 
 ```
 penguin_creator/
-  dataset.py      CSV layouts, dialect detection, lossless read/write
-  reference.py    per-species statistics from the original data
-  generator.py    plausible batch generation (multivariate normal per species/sex)
-  server.py       stdlib HTTP server and JSON API
-  data/           the original Palmer penguins CSV (reference data)
-  static/         index.html, css/, js/ (sprite.js, colony.js, camera.js, app.js), fonts/
-tests/            compatibility, generator and server tests (+ official CSV fixtures)
+  server.py         stdlib static file server
+  reference.py      builds static/data/reference.json from the original data
+  static/
+    index.html, css/, fonts/
+    js/csv.js       CSV layouts, dialect detection, lossless read/write
+    js/generator.js plausible batch generation (multivariate normal per species/sex)
+    js/sprite.js, colony.js, camera.js, app.js   drawing, map, camera, UI
+    data/           the original Palmer penguins CSV and reference.json
+tests/
+  browser.py        runs the app's JavaScript in headless Chrome
+  test_*.py         compatibility, generator, reference and server tests
+  fixtures/         the official palmerpenguins CSVs
 ```
 
 ## Credits
