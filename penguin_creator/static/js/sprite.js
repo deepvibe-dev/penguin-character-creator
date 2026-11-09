@@ -1,4 +1,5 @@
-// Procedural pixel-art penguins. No dependencies.
+// Procedural pixel-art penguins.
+import { speciesKey as shortSpecies } from "./csv.js";
 //
 // Every visible feature is driven by a column of the Palmer penguins dataset:
 //   Species              -> plumage pattern, bill and feet colour
@@ -30,17 +31,9 @@ const SPECIES_STYLE = {
   Gentoo: { bill: "#ee6a2a", billTip: "#2a2730", feet: "#f39a35", feetDark: "#d07a1c" },
 };
 
-export const SPECIES_FULL = {
-  Adelie: "Adelie Penguin (Pygoscelis adeliae)",
-  Chinstrap: "Chinstrap penguin (Pygoscelis antarctica)",
-  Gentoo: "Gentoo penguin (Pygoscelis papua)",
-};
-
-export function shortSpecies(full) {
-  for (const [k, v] of Object.entries(SPECIES_FULL)) if (v === full) return k;
-  const first = (full || "").split(" ")[0];
-  return SPECIES_FULL[first] ? first : null;
-}
+// Species names come from csv.js; shortSpecies() here returns null for anything
+// that isn't one of the three Palmer species.
+export { SPECIES as SPECIES_FULL, speciesKey as shortSpecies } from "./csv.js";
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const norm = (v, lo, hi) => clamp01((v - lo) / (hi - lo));

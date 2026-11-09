@@ -1,15 +1,20 @@
 // Penguin Creator front end. Plain ES modules, no build step, no dependencies.
+// Everything runs in the browser: reading and writing CSVs (csv.js), hatching
+// colonies (generator.js), drawing (sprite.js, colony.js). The server only
+// serves these files.
 import { drawScene, drawThumbnail, shortSpecies, SPECIES_FULL } from "./sprite.js";
 import { renderColony } from "./colony.js";
 import { Camera } from "./camera.js";
+import {
+  INDEX_COLUMN_NAMES, LTER_COLUMNS, SIMPLE_COLUMNS,
+  convertDialect, defaultDialect, formatDate, formatNumber, parseCsv, parseDate, parseNumber,
+  studyNameForYear, writeCsv,
+} from "./csv.js";
+import { generate } from "./generator.js";
 
-const LTER_COLUMNS = [
-  "studyName", "Sample Number", "Species", "Region", "Island", "Stage", "Individual ID",
-  "Clutch Completion", "Date Egg", "Culmen Length (mm)", "Culmen Depth (mm)",
-  "Flipper Length (mm)", "Body Mass (g)", "Sex", "Delta 15 N (o/oo)", "Delta 13 C (o/oo)", "Comments",
-];
-const SIMPLE_COLUMNS = ["species", "island", "bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g", "sex", "year"];
-const STANDARD_COLUMNS = new Set([...LTER_COLUMNS, ...SIMPLE_COLUMNS, "", "rowid", "Unnamed: 0", "index"]);
+const STANDARD_COLUMNS = new Set([...LTER_COLUMNS, ...SIMPLE_COLUMNS, ...INDEX_COLUMN_NAMES]);
+const SAMPLE_CSV = "/static/data/penguins_lter.csv";
+const REFERENCE_JSON = "/static/data/reference.json";
 
 const MEASURE_LABELS = {
   "Culmen Length (mm)": ["Bill length", "mm"],
@@ -26,10 +31,7 @@ const CLUTCH_LIST = ["Yes", "No", ""];
 const PAGE_SIZE = 25;
 const STORAGE_KEY = "penguin-creator:colony:v1";
 
-const DEFAULT_DIALECT = {
-  layout: "lter", header: LTER_COLUMNS, na: "", newline: "\n", trailing_newline: false,
-  date_style: "mdy", sex_style: "upper", float_style: "plain", index_column: null,
-};
+const DEFAULT_DIALECT = defaultDialect();
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, props = {}, ...children) => {
@@ -50,7 +52,6 @@ const state = {
   records: [],
   filename: null,
   dirty: false,
-  workspace: null,
   editing: null, // record object being edited, or null for a new penguin
   draft: null,
   draftDirty: false,
@@ -65,36 +66,14 @@ const state = {
 };
 
 // ---------------------------------------------------------------------------
-// formatting helpers (mirror penguin_creator/dataset.py)
+// formatting helpers (shared with csv.js so edits are written like the original data)
 
-function fmt(value, precision) {
-  if (!Number.isFinite(value)) return "";
-  let text = (Math.round(value * 10 ** precision) / 10 ** precision).toFixed(precision);
-  if (text.includes(".")) text = text.replace(/0+$/, "").replace(/\.$/, "");
-  return text === "-0" ? "0" : text;
-}
-const num = (v) => {
-  const n = parseFloat(v);
-  return Number.isFinite(n) && /^\s*-?\d*\.?\d+(e-?\d+)?\s*$/i.test(String(v)) ? n : null;
-};
-
-function parseDate(text) {
-  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(text || "");
-  if (m) {
-    let y = +m[3];
-    if (y < 100) y += 2000;
-    return { y, m: +m[1], d: +m[2] };
-  }
-  m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text || "");
-  if (m) return { y: +m[1], m: +m[2], d: +m[3] };
-  return null;
-}
+const fmt = formatNumber;
+const num = parseNumber;
 const pad = (n) => String(n).padStart(2, "0");
-function formatDate(d, style) {
-  if (!d) return "";
-  return style === "iso" ? `${d.y}-${pad(d.m)}-${pad(d.d)}` : `${d.m}/${d.d}/${pad(d.y % 100)}`;
-}
-const studyNameFor = (year) => `PAL${pad(year % 100)}${pad((year + 1) % 100)}`;
+const studyNameFor = studyNameForYear;
+
+/** Year shown by the edited fields: egg date first, then study name, then the stored year. */
 function yearOf(rec) {
   const d = parseDate(rec["Date Egg"]);
   if (d) return String(d.y);
@@ -107,22 +86,17 @@ const sexLabel = (s) => (s === "MALE" ? "Male" : s === "FEMALE" ? "Female" : s ?
 const sexSymbol = (s) => (s === "MALE" ? "♂" : s === "FEMALE" ? "♀" : "?");
 
 // ---------------------------------------------------------------------------
-// API
+// static files
 
-async function api(path, options = {}) {
-  const res = await fetch(path, options);
-  if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`;
-    try {
-      message = (await res.json()).error || message;
-    } catch (_) { /* not json */ }
-    throw new Error(message);
-  }
-  const type = res.headers.get("Content-Type") || "";
-  return type.includes("application/json") ? res.json() : res.text();
+async function fetchStatic(path, as = "text") {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path}: ${res.status} ${res.statusText}`);
+  return as === "json" ? res.json() : res.text();
 }
-const postJSON = (path, body, method = "POST") =>
-  api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+async function loadSample() {
+  return { ...parseCsv(await fetchStatic(SAMPLE_CSV)), filename: SAMPLE_CSV.split("/").pop() };
+}
 
 // ---------------------------------------------------------------------------
 // reference statistics & plausibility
@@ -702,7 +676,6 @@ function renderStatus() {
     ` · ${layout} · ${state.records.length} penguin${state.records.length === 1 ? "" : "s"}`,
   );
   if (extraColumns().length) s.append(` · extra columns: ${extraColumns().join(", ")}`);
-  if (state.workspace) s.append(` · server file: ${state.workspace}`);
   if (state.dirty) s.append(" · ", el("span", { class: "dirty" }, "unsaved changes"));
 }
 
@@ -778,14 +751,9 @@ function setView(view) {
 // ---------------------------------------------------------------------------
 // file operations
 
-async function readFileText(file) {
-  return await file.text();
-}
-
 async function openCsv(file, append) {
   try {
-    const text = await readFileText(file);
-    const parsed = await api("/api/parse", { method: "POST", headers: { "Content-Type": "text/csv" }, body: text });
+    const parsed = parseCsv(await file.text());
     if (!append) {
       if (state.dirty && !confirm("Replace the current colony? Unsaved changes will be lost.")) return;
       loadDataset({ ...parsed, filename: file.name });
@@ -819,7 +787,7 @@ async function openCsv(file, append) {
 async function download() {
   const layout = $("#export-layout").value;
   try {
-    const text = await postJSON("/api/export", { records: state.records, dialect: state.dialect, layout: layout || undefined });
+    const text = writeCsv(state.records, convertDialect(state.dialect, layout));
     const effective = layout || state.dialect.layout;
     let name = state.filename || (effective === "simple" ? "penguins.csv" : "penguins_lter.csv");
     if (layout && layout !== state.dialect.layout) name = name.replace(/\.csv$/i, "") + (layout === "simple" ? "_palmerpenguins.csv" : "_lter.csv");
@@ -838,21 +806,9 @@ async function download() {
   }
 }
 
-async function saveToServer() {
-  try {
-    const res = await postJSON("/api/workspace", { records: state.records, dialect: state.dialect }, "PUT");
-    state.dirty = false;
-    renderStatus();
-    scheduleAutosave();
-    toast(`Saved ${res.saved} penguins to ${res.filename}.`);
-  } catch (err) {
-    toast(`Save failed: ${err.message}`, true);
-  }
-}
-
-async function hatch(form) {
+function hatch(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  const payload = {
+  const options = {
     count: parseInt(data.count, 10),
     species: data.species,
     sex: data.sex,
@@ -860,11 +816,11 @@ async function hatch(form) {
     year: parseInt(data.year, 10),
     variation: parseFloat(data.variation),
     seed: data.seed === "" ? null : parseInt(data.seed, 10),
-    dialect: state.dialect,
-    existing: state.records.map((r) => ({ Species: r.Species, "Sample Number": r["Sample Number"], "Individual ID": r["Individual ID"] })),
+    dateStyle: state.dialect.date_style,
+    existing: state.records,
   };
   try {
-    const { records } = await postJSON("/api/generate", payload);
+    const records = generate(state.ref, options);
     const extras = extraColumns();
     for (const r of records) {
       r.extra = Object.fromEntries(extras.map((c) => [c, ""]));
@@ -881,12 +837,12 @@ async function hatch(form) {
   }
 }
 
-async function roll() {
+function roll() {
   const d = state.draft;
   const sp = shortSpecies(d.Species);
   if (!sp) return toast("Pick one of the three species first.", true);
   try {
-    const { records } = await postJSON("/api/generate", {
+    const records = generate(state.ref, {
       count: 1,
       species: sp,
       sex: d.Sex === "MALE" || d.Sex === "FEMALE" ? d.Sex : "random",
@@ -926,8 +882,12 @@ function wire() {
   });
   $("#btn-sample").addEventListener("click", async () => {
     if (state.dirty && !confirm("Load the original dataset? Unsaved changes will be lost.")) return;
-    loadDataset(await api("/api/sample"));
-    scheduleAutosave();
+    try {
+      loadDataset(await loadSample());
+      scheduleAutosave();
+    } catch (err) {
+      toast(`Could not load the original data: ${err.message}`, true);
+    }
   });
   $("#btn-new-file").addEventListener("click", () => {
     if (state.dirty && !confirm("Start a new, empty colony? Unsaved changes will be lost.")) return;
@@ -941,7 +901,6 @@ function wire() {
   $("#map-zoom-out").addEventListener("click", () => state.camera && state.camera.zoomBy(1 / 1.5));
   $("#map-fit").addEventListener("click", () => state.camera && state.camera.fit());
   $("#map-edge").addEventListener("change", (e) => { if (state.camera) state.camera.edgeScroll = e.target.checked; });
-  $("#btn-save-server").addEventListener("click", saveToServer);
 
   $("#btn-save").addEventListener("click", () => saveDraft(false));
   $("#btn-save-new").addEventListener("click", () => saveDraft(true));
@@ -1001,15 +960,8 @@ async function init() {
   wire();
   setupPickers();
   try {
-    const [ref, config] = await Promise.all([api("/api/reference"), api("/api/config")]);
-    state.ref = ref;
-    state.workspace = config.workspace;
+    state.ref = await fetchStatic(REFERENCE_JSON, "json");
     buildSliders();
-    $("#btn-save-server").hidden = !config.workspace;
-    if (config.workspace) {
-      loadDataset(await api("/api/workspace"));
-      return;
-    }
     let saved = null;
     try {
       saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -1020,7 +972,7 @@ async function init() {
       loadDataset(saved, { dirty: !!saved.dirty });
       toast(`Restored your colony from last time (${saved.records.length} penguins).`);
     } else {
-      loadDataset(await api("/api/sample"));
+      loadDataset(await loadSample());
     }
   } catch (err) {
     toast(`Could not start: ${err.message}`, true);

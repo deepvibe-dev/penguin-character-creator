@@ -15,6 +15,7 @@ penguin-creator = "penguin_creator.server:main"
 dev = [
     "pytest>=8",
     "pandas>=2",
+    "websockets==17.3",
 ]
 
 [build-system]

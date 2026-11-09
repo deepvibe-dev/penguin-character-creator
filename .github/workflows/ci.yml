@@ -62,7 +62,9 @@ jobs:
         run: uv lock --check
       - name: Install (Python version from .python-version)
         run: uv sync --frozen
-      - name: Run tests (including Palmer penguins CSV compatibility)
+      - name: Run tests (CSV compatibility runs the app's JavaScript in headless Chrome)
+        env:
+          CHROME_BIN: google-chrome
         run: uv run pytest -v
 
   image:
@@ -94,12 +96,14 @@ jobs:
           test "$(docker exec penguins uname -m)" = "$([ "$ARCH" = amd64 ] && echo x86_64 || echo aarch64)"
           for i in $(seq 1 60); do curl -fsS http://localhost:8000/healthz && break; sleep 1; done
           curl -fsS http://localhost:8000/ | grep -q "<title>Penguin Creator</title>"
-          curl -fsS http://localhost:8000/api/sample > sample.json
-          curl -fsS -X PUT http://localhost:8000/api/workspace \
-            -H 'Content-Type: application/json' --data-binary @sample.json
-          docker exec penguins cat /data/penguins.csv > written.csv
-          cmp written.csv penguin_creator/data/penguins_lter.csv
-          echo "linux/${ARCH} container round-trips the original CSV byte-for-byte."
+          curl -fsS http://localhost:8000/static/js/csv.js | grep -q "export function parseCsv"
+          curl -fsS http://localhost:8000/static/data/reference.json > reference.json
+          cmp reference.json penguin_creator/static/data/reference.json
+          curl -fsS http://localhost:8000/static/data/penguins_lter.csv > served.csv
+          cmp served.csv penguin_creator/static/data/penguins_lter.csv
+          # the app is static: the server refuses anything but GET/HEAD
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/)" = 405
+          echo "linux/${ARCH} container serves the app and its data unchanged."
       - name: Container logs
         if: failure()
         run: docker logs penguins
