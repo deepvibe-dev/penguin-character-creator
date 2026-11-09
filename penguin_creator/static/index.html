@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Penguin Creator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect x='2' y='1' width='4' height='6' fill='%23283044'/%3E%3Crect x='3' y='3' width='3' height='4' fill='%23f7f3e8'/%3E%3Crect x='6' y='2' width='1' height='1' fill='%23ee6a2a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="title"><span class="title-icon" aria-hidden="true"></span>Penguin Creator</h1>
+    <nav class="tabs" aria-label="View">
+      <button class="tab" data-view="creator" aria-pressed="true">Creator</button>
+      <button class="tab" data-view="map" aria-pressed="false">Colony map</button>
+    </nav>
+    <nav class="toolbar" aria-label="File">
+      <button class="btn" id="btn-new-file" title="Start an empty dataset">New</button>
+      <label class="btn" title="Open a Palmer penguins CSV (replaces the current colony)">Open CSV<input type="file" id="file-open" accept=".csv,text/csv" hidden></label>
+      <label class="btn" title="Append the penguins of another CSV to this colony">Append CSV<input type="file" id="file-append" accept=".csv,text/csv" hidden></label>
+      <button class="btn" id="btn-sample" title="Load the original Palmer penguins dataset">Original data</button>
+      <span class="toolbar-sep"></span>
+      <select id="export-layout" class="select" title="Column layout of the downloaded file">
+        <option value="">Same layout as opened</option>
+        <option value="lter">Raw LTER (17 columns)</option>
+        <option value="simple">palmerpenguins (8 columns)</option>
+      </select>
+      <button class="btn btn-gold" id="btn-download">Download CSV</button>
+      <button class="btn btn-gold" id="btn-save-server" hidden>Save to server</button>
+    </nav>
+  </header>
+
+  <div class="statusline" id="statusline" role="status" aria-live="polite"></div>
+
+  <main class="layout" id="creator-view">
+    <!-- ============ creator ============ -->
+    <section class="panel creator" aria-labelledby="creator-title">
+      <h2 id="creator-title" class="panel-title"><span id="creator-mode">New penguin</span></h2>
+
+      <div class="creator-grid">
+        <div class="portrait-col">
+          <div class="portrait-frame">
+            <canvas id="portrait" width="112" height="84" aria-label="Pixel art portrait of the penguin"></canvas>
+            <span class="sex-badge" id="sex-badge" aria-hidden="true">?</span>
+          </div>
+
+          <div class="pickers">
+            <div class="picker" data-field="Species">
+              <span class="picker-label">Species</span>
+              <button class="arrow" data-dir="-1" aria-label="Previous species">&#9664;</button>
+              <output class="picker-value"></output>
+              <button class="arrow" data-dir="1" aria-label="Next species">&#9654;</button>
+            </div>
+            <div class="picker" data-field="Island">
+              <span class="picker-label">Island</span>
+              <button class="arrow" data-dir="-1" aria-label="Previous island">&#9664;</button>
+              <output class="picker-value"></output>
+              <button class="arrow" data-dir="1" aria-label="Next island">&#9654;</button>
+            </div>
+            <div class="picker" data-field="Sex">
+              <span class="picker-label">Sex</span>
+              <button class="arrow" data-dir="-1" aria-label="Previous sex">&#9664;</button>
+              <output class="picker-value"></output>
+              <button class="arrow" data-dir="1" aria-label="Next sex">&#9654;</button>
+            </div>
+            <div class="picker" data-field="Clutch Completion">
+              <span class="picker-label">Full clutch</span>
+              <button class="arrow" data-dir="-1" aria-label="Previous clutch value">&#9664;</button>
+              <output class="picker-value"></output>
+              <button class="arrow" data-dir="1" aria-label="Next clutch value">&#9654;</button>
+            </div>
+          </div>
+
+          <details class="legend">
+            <summary>What am I looking at?</summary>
+            <ul>
+              <li><b>Body size</b> follows body mass, <b>height</b> and <b>flippers</b> follow flipper length.</li>
+              <li><b>Bill</b> length and thickness follow culmen length and depth.</li>
+              <li><b>Eggs</b>: two for a full clutch, one if not.</li>
+              <li><b>Food</b>: krill for low &delta;15N, fish for high &delta;15N (trophic level).</li>
+              <li><b>Water</b>: deep blue offshore (low &delta;13C), teal inshore (high &delta;13C).</li>
+              <li><b>Backdrop</b>: Biscoe, Dream or Torgersen island.</li>
+            </ul>
+          </details>
+        </div>
+
+        <div class="sliders-col">
+          <div id="sliders"></div>
+          <div class="slider-key" aria-hidden="true">
+            <span><i class="key key-typical"></i>typical (95% of real penguins)</span>
+            <span><i class="key key-seen"></i>ever observed</span>
+            <span><i class="key key-mean"></i>average</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog" id="field-guide">
+        <div class="dialog-name">Field guide</div>
+        <p id="guide-text"></p>
+      </div>
+
+      <details class="record-details" open>
+        <summary>Field record</summary>
+        <div class="fields" id="fields"></div>
+      </details>
+
+      <div class="actions">
+        <button class="btn" id="btn-typical" title="Set every measurement to the average for this species and sex">Make typical</button>
+        <button class="btn" id="btn-randomize" title="Roll a random but plausible penguin of this species and sex">Roll plausible</button>
+        <span class="actions-spacer"></span>
+        <button class="btn" id="btn-revert">Revert</button>
+        <button class="btn" id="btn-save-new">Add as new</button>
+        <button class="btn btn-ok" id="btn-save">Add to colony</button>
+      </div>
+    </section>
+
+    <!-- ============ ledger ============ -->
+    <section class="panel ledger" aria-labelledby="ledger-title">
+      <div class="ledger-head">
+        <h2 id="ledger-title" class="panel-title">Colony ledger <small id="ledger-count"></small></h2>
+        <button class="btn btn-gold" id="btn-hatch">Hatch a colony&hellip;</button>
+      </div>
+      <div class="filters">
+        <select id="filter-species" class="select" aria-label="Filter by species"><option value="">All species</option></select>
+        <select id="filter-island" class="select" aria-label="Filter by island"><option value="">All islands</option></select>
+        <select id="filter-plausibility" class="select" aria-label="Filter by plausibility">
+          <option value="">Any plausibility</option>
+          <option value="unusual">Unusual or worse</option>
+          <option value="implausible">Implausible only</option>
+        </select>
+        <input id="filter-text" class="input" type="search" placeholder="Search ID, study, comment&hellip;" aria-label="Search">
+      </div>
+      <div class="bulkbar">
+        <label><input type="checkbox" id="select-page"> Select page</label>
+        <button class="btn btn-small" id="btn-delete-selected" disabled>Delete selected</button>
+        <span id="selected-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th class="col-check"></th>
+              <th></th>
+              <th>#</th>
+              <th>ID</th>
+              <th>Species</th>
+              <th>Island</th>
+              <th>Sex</th>
+              <th title="Culmen length / depth (mm)">Bill</th>
+              <th title="Flipper length (mm)">Flipper</th>
+              <th title="Body mass (g)">Mass</th>
+              <th title="Plausibility">&#10003;</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button class="btn btn-small" id="page-prev">&#9664;</button>
+        <span id="page-info"></span>
+        <button class="btn btn-small" id="page-next">&#9654;</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ colony map ============ -->
+  <section class="panel map-panel" id="map-view" aria-labelledby="map-title" hidden>
+    <div class="map-head">
+      <h2 id="map-title" class="panel-title">Colony map <small id="map-count"></small></h2>
+      <div class="map-tools">
+        <label><input type="checkbox" id="map-unusual"> Flag unusual penguins</label>
+        <label title="Pan when the pointer rests near the edge of the map"><input type="checkbox" id="map-edge" checked> Edge scrolling</label>
+        <button class="btn btn-small" id="map-zoom-out" aria-label="Zoom out">&minus;</button>
+        <output id="map-zoom">1&times;</output>
+        <button class="btn btn-small" id="map-zoom-in" aria-label="Zoom in">+</button>
+        <button class="btn btn-small" id="map-fit">Fit</button>
+      </div>
+    </div>
+    <p class="hint">Every penguin in the file, on the island where it was recorded and grouped by species. Bigger birds are drawn bigger, with longer flippers and bills to match their measurements. Hover a penguin for its numbers, or click it to open it in the creator.<br>
+      Drag, use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrow keys or rest the pointer at an edge to pan; scroll to zoom; <kbd>0</kbd> fits the map.</p>
+    <div class="map-scroll" id="map-scroll">
+      <div class="map-stage" id="map-stage"></div>
+    </div>
+  </section>
+
+  <!-- ============ batch dialog ============ -->
+  <dialog id="hatch-dialog" class="panel modal">
+    <form method="dialog" id="hatch-form">
+      <h2 class="panel-title">Hatch a colony</h2>
+      <p class="hint">Penguins are sampled from the real measurements of their species and sex, keeping natural correlations (heavy penguins have long flippers). Nest-mates come in male/female pairs.</p>
+      <div class="form-grid">
+        <label>How many<input class="input" type="number" name="count" min="1" max="10000" value="50" required></label>
+        <label>Species
+          <select class="select" name="species">
+            <option value="mixed">Mixed (like the original)</option>
+            <option>Adelie</option><option>Chinstrap</option><option>Gentoo</option>
+          </select>
+        </label>
+        <label>Sex
+          <select class="select" name="sex">
+            <option value="random">Breeding pairs</option>
+            <option value="MALE">All male</option>
+            <option value="FEMALE">All female</option>
+          </select>
+        </label>
+        <label>Island
+          <select class="select" name="island">
+            <option value="natural">Where they really live</option>
+            <option>Biscoe</option><option>Dream</option><option>Torgersen</option>
+          </select>
+        </label>
+        <label>Season (year)<input class="input" type="number" name="year" min="1900" max="2999" value="2010" required></label>
+        <label>Seed (optional)<input class="input" type="number" name="seed" placeholder="random"></label>
+        <label class="span-2">Variation <output id="variation-out">1.0&times; natural</output>
+          <input type="range" name="variation" min="0" max="2" step="0.1" value="1">
+        </label>
+      </div>
+      <div class="actions">
+        <span class="actions-spacer"></span>
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-ok" value="hatch" id="hatch-go">Hatch!</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
